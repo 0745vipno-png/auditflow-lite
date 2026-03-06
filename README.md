@@ -133,13 +133,6 @@ License
 Apache License 2.0
 
 
----
-
-# 為什麼這樣寫
-
-這個 README 結構是 **典型開源專案 landing page**：
-
-順序是：
 
 
 Title
@@ -161,8 +154,6 @@ Security model
 Roadmap
 ↓
 License
-
----
 
 ## License
 
