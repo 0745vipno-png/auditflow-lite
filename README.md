@@ -161,3 +161,16 @@ Security model
 Roadmap
 ↓
 License
+
+---
+
+## License
+
+This project is licensed under the **GNU General Public License v3.0 (GPLv3)**.
+
+### What this means for you:
+- **Commercial Use**: You **CAN** use this tool for commercial purposes (e.g., as part of a security audit service).
+- **Modification and Distribution**: If you modify AuditFlow Lite or integrate it into your own software, you **MUST** release your source code under the same GPLv3 license.
+- **No Warranty**: This software is provided "as is" without any warranty.
+
+For more details, see the [LICENSE](LICENSE) file in the root directory.
