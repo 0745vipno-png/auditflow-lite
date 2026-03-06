@@ -1,0 +1,78 @@
+AuditFlow Lite — Architecture (High-Level) [Revised v0.1-ready]
+
+Goal:
+- One-shot, read-only evidence collection (no mutation of user data)
+- Append-only evidence store (SQLite) ENFORCED (no UPDATE/DELETE on evidence/chain/artifacts)
+- Tamper-evident chain with run sealing (final_chain_hash + evidence_count)
+- Human-readable reports + optional read-only web UI
+
+──────────────────────────────────────────────────────────────────────────────
+[User]
+  ├─ runs CLI commands (init/plan/run/diff/verify/export)
+  └─ reads reports (md/html) and makes decisions
+
+                    (one-shot invocation)
+                          │
+                          ▼
+┌────────────────────────────────────────────────────────────────────────────┐
+│                               auditflow CLI                                │
+│  - argument parsing / profile loading / variable injection                  │
+│  - PLAN stage (dry-run): resolved collectors + expanded targets + options   │
+│  - guardrails (refuse unsafe targets unless --force)                        │
+│  - run orchestration (delegates to core pipeline)                           │
+│  - deterministic ordering / canonical JSON rules                            │
+└────────────────────────────────────────────────────────────────────────────┘
+                          │
+              creates run_id + env_fingerprint (+ run_seed_hash)
+                          │
+                          ▼
+┌────────────────────────────────────────────────────────────────────────────┐
+│                              Core Run Pipeline                              │
+│  - create RUNNING run record (runs)                                         │
+│  - execute collectors (read-only)                                           │
+│  - write evidence (append-only) + update hash chain                          │
+│  - generate artifacts (reports/diffs)                                       │
+│  - seal run: write final_chain_hash + evidence_count + finished_at + status │
+└────────────────────────────────────────────────────────────────────────────┘
+                          │
+        ┌─────────────────┼───────────────────────────────┐
+        │                 │                               │
+        ▼                 ▼                               ▼
+┌────────────────┐  ┌────────────────────────┐   ┌──────────────────────────┐
+│ Collectors       │  │ Evidence Store (SQLite) │   │ Report Engine            │
+│ (read-only)      │  │  - runs                │   │ (md/html)                 │
+│                  │  │    * status RUNNING→OK │   │  - summary/highlights     │
+│ - filesystem      │  │    * env_fingerprint   │   │  - evidence stats         │
+│ - schtasks        │  │    * run_seed_hash     │   │  - details/top-N links    │
+│ - process*        │  │    * final_chain_hash  │   │  - artifact hashes/paths  │
+│ - eventlog*       │  │    * evidence_count    │   └──────────────────────────┘
+│                  │  │  - evidence (append-only)            │
+│ produces         │  │    * payload_json (canonical)         │ writes artifacts
+│ EvidenceRecords  │  │    * payload_hash                     │ to filesystem
+└────────────────┘  │    * attachment_sha256/size (optional) │
+        │            │  - chain (append-only)                 │
+        │            │    * seq, prev_hash, this_hash         │
+        │            │  - artifacts (append-only)             │
+        │            │    * path, sha256                      │
+        │            └────────────────────────┘               │
+        │                        │                            │
+        │ inserts evidence+chain  │ stores indexes+hashes      │
+        ▼                        ▼                            ▼
+  EvidenceRecords            auditflow.db                 artifacts/<run_id>/
+  (canonical JSON +          (append-only ENFORCED)       report.md / diff.md
+   optional attachment files)                             (and/or html)
+
+Notes on integrity:
+- attachment files are hashed (attachment_sha256) and INCLUDED in payload_hash
+- artifact files are hashed (artifacts.sha256) and recorded in DB
+- (recommended) artifact manifest is also recorded as Evidence(kind=artifact_manifest)
+  so report/diff hashes are covered by the same chain
+
+Optional (v0.3+):
+┌────────────────────────────────────────────────────────────────────────────┐
+│                          Read-only Web (Flask)                              │
+│  - list runs / run details                                                  │
+│  - search evidence (optional FTS)                                           │
+│  - download reports                                                         │
+│  - NO mutation endpoints (read-only enforced)                               │
+└────────────────────────────────────────────────────────────────────────────┘

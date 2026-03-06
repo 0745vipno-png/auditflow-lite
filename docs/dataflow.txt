@@ -1,0 +1,120 @@
+AuditFlow Lite 
+
+Command:
+  auditflow run --profile windows_basic --target D:\Work --tags project=X --notes "..."
+
+Step-by-step:
+
+0) PLAN stage (optional but recommended; used by --dry-run):
+   - CLI loads profile YAML/JSON
+   - inject variables:
+       {{TARGETS}} = ["D:\Work", ...] (list)
+       {{TARGET}}  = first target (only valid when exactly 1 target)
+   - resolve collectors + options (expanded + normalized)
+   - output "plan" to user (collectors, expanded targets, excludes, hash_files on/off)
+   - if --dry-run: STOP here (no DB writes)
+
+1) Guardrails:
+   - validate all targets exist & readable
+   - validate profile schema + option types
+   - refuse unsafe targets unless --force
+   - ensure AUDITFLOW_HOME exists + artifacts/ writable
+   - ensure DB openable + writable
+
+2) Create Run Metadata (RUNNING):
+   - run_id = uuid4
+   - started_at = now (ISO8601)
+   - env_dict = canonicalized env info (OS, host, python, profile_hash, etc.)
+   - env_fingerprint = sha256(canonical env_dict JSON)
+   - run_seed_dict = canonical { profile_hash, targets_hash, env_fingerprint, tool_version }
+   - run_seed_hash = sha256(canonical run_seed_dict JSON)
+   - INSERT into runs:
+       (run_id, started_at, status="RUNNING", profile, targets_json, tags_json, notes,
+        env_fingerprint, run_seed_hash)
+
+3) Execute Collectors (read-only):
+   For each collector in deterministic order:
+     a) collect(context) -> stream of EvidenceRecord(s)
+     b) normalize + canonicalize each record:
+          - stable ordering for lists (e.g., filesystem entries sorted by path_norm)
+          - canonical JSON (sort_keys, separators)
+     c) attachments (optional):
+          - if record has attachment file:
+              attachment_sha256 = sha256(file bytes)
+              attachment_size   = file size
+          - else: attachment_sha256/size = NULL
+     d) compute payload_hash:
+          payload_hash = sha256(canonical_payload_json || attachment_sha256 || attachment_size)
+     e) INSERT evidence (append-only):
+          (evidence_id, run_id, collector, kind, ts, payload_json,
+           attachment_path, attachment_sha256, attachment_size, payload_hash)
+
+   Notes on scale (important for filesystem/task outputs):
+     - prefer "summary evidence" + "attachment JSONL" for large result sets
+     - keep DB row counts bounded; store large bodies as attachments
+
+4) Update Tamper-evident Chain (append-only, per evidence insert):
+   - prev_hash = last chain.this_hash for this run_id (or run_seed_hash as GENESIS)
+   - this_hash = sha256(prev_hash || run_id || seq || evidence_id || payload_hash)
+   - INSERT into chain:
+       (run_id, evidence_id, prev_hash, this_hash, created_at)
+     where seq is AUTOINCREMENT (global or per-run; per-run preferred)
+
+   Transaction boundary (recommended):
+     - wrap steps 3e + 4 in a single transaction per collector batch
+       (insert many evidence rows + corresponding chain rows, then COMMIT)
+
+5) Generate Artifacts:
+   - build report.md (and/or html later):
+       - run summary (profile, targets, started/finished, status)
+       - env_fingerprint (+ key env fields)
+       - evidence counts (by collector/kind)
+       - warnings/errors highlights
+       - artifact list (paths + sha256)
+   - write to filesystem:
+       artifacts/<run_id>/report.md
+   - compute artifact_sha256 for each artifact file
+   - INSERT into artifacts table (append-only):
+       (artifact_id, run_id, type, path, sha256, created_at)
+
+   (Recommended integrity upgrade: Artifact Manifest Evidence)
+   - create an EvidenceRecord(kind="artifact_manifest") containing:
+       { artifacts: [{type, path, sha256}, ...] }
+   - insert this evidence + chain it as in steps 3/4
+   - ensures report/diff hashes are covered by the same tamper-evident chain
+
+6) Finalize & SEAL Run:
+   - evidence_count = COUNT(evidence WHERE run_id=...)
+   - final_chain_hash = last chain.this_hash for this run_id
+   - finished_at = now (ISO8601)
+   - compute status:
+       OK   = no collector errors + no rule-based warnings (if any)
+       WARN = partial collector failures OR warnings present
+       FAIL = core collectors failed OR run cannot be trusted/complete
+   - UPDATE runs (restricted fields only; enforced by triggers/policy):
+       set finished_at, status, warnings_count, errors_count,
+           evidence_count, final_chain_hash
+     (NOTE: evidence/chain/artifacts remain non-updatable)
+
+7) Output to user:
+   - run_id, status, report path, warnings/errors summary
+   - (optional) print final_chain_hash for external anchoring/manual copy
+
+Verification (separate command):
+  auditflow verify <run_id>
+   1) load runs row:
+        run_seed_hash, final_chain_hash, evidence_count
+   2) re-hash chain from genesis (run_seed_hash) through all seq:
+        recompute this_hash for each row using stored evidence payload_hash
+   3) PASS criteria:
+        - recomputed hashes match each stored chain.this_hash
+        - recomputed last hash == runs.final_chain_hash
+        - counted evidence rows == runs.evidence_count
+      else FAIL with diagnostic (first mismatching seq/evidence_id)
+
+Notes:
+- "tamper-evident" assumes verifier trusts the sealed values (final_chain_hash)
+  and/or anchors them externally; it does not prevent privileged DB rewrite.
+- append-only is enforced:
+    * triggers deny UPDATE/DELETE on evidence/chain/artifacts
+    * runs UPDATE allowed only for finalize fields above

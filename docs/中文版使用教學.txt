@@ -1,0 +1,22 @@
+bash 
+
+python -m auditflow.cli init
+
+python -m auditflow.cli run --profile test --target .
+
+-------------------------------------------------------------------------
+
+遇到報錯處理方式:
+
+-------------------------------------------------------------------------
+
+解決方案 B（不用搬檔案）： 在指令中直接指定完整路徑，跳過自動搜尋邏輯： 
+
+bash python -m auditflow.cli run --profile auditflow/profiles/test.yaml --target .
+
+
+解決方案 C（指定 Home）： 想讓整個系統就跑在桌面的這個資料夾（包含資料庫跟 report），可以用 --home 參數： 
+
+bash 
+
+python -m auditflow.cli --home . run --profile auditflow/profiles/test.yaml --target .

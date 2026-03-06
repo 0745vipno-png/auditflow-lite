@@ -1,0 +1,81 @@
+Quick Start
+
+Initialize the AuditFlow environment:
+
+python -m auditflow.cli init
+
+Run a test audit:
+
+python -m auditflow.cli run --profile test --target .
+
+This will:
+
+create a new run
+
+collect evidence
+
+generate a report
+
+write results to the local AuditFlow store
+
+Example output:
+
+[INFO] Run ID: 2026-03-06T02-56-26Z
+[INFO] Status: OK
+[INFO] Report: artifacts/<run_id>/report.md
+Troubleshooting
+
+If you encounter an error when running the command, the most common cause is that the profile file cannot be found.
+
+Example error:
+
+Profile not found: test
+
+This usually happens when the profile file is not located in the default profiles/ directory.
+
+Solution A (recommended)
+
+Place the profile file inside the profiles/ directory:
+
+profiles/
+  test.yaml
+
+Then run:
+
+python -m auditflow.cli run --profile test --target .
+Solution B (use full path)
+
+If the profile file is located somewhere else, specify the full path:
+
+python -m auditflow.cli run \
+  --profile auditflow/profiles/test.yaml \
+  --target .
+
+This bypasses the automatic profile search logic.
+
+Solution C (set custom runtime directory)
+
+If you want the database and reports to live in the current folder instead of ~/.auditflow, use --home:
+
+python -m auditflow.cli --home . run \
+  --profile auditflow/profiles/test.yaml \
+  --target .
+
+This will create the runtime structure locally:
+
+./auditflow.db
+./artifacts/
+./logs/
+Example Project Layout
+
+A typical local project layout might look like this:
+
+auditflow-lite/
+│
+├─ auditflow/
+├─ profiles/
+│   └─ test.yaml
+│
+├─ artifacts/
+├─ logs/
+└─ auditflow.db

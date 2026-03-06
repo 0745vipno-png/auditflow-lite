@@ -1,0 +1,173 @@
+AuditFlow Lite — Run Lifecycle State Machine 
+
+Design intent:
+- Separate "PHASE" (execution progress) from "STATUS/RESULT" (user-facing outcome)
+- Streaming-friendly: collectors may yield evidence while store+chain writes in batches
+- Seal run with (final_chain_hash, evidence_count) for strong verification endpoint
+- Allow graceful degradation: some collector failures => WARN, not always FAIL
+
+──────────────────────────────────────────────────────────────────────────────
+A) User-facing Run STATUS (DB: runs.status)
+
+Non-terminal:
+  RUNNING
+
+Terminal:
+  OK
+  WARN
+  FAIL
+  ABORTED   (process interrupted/crashed; not properly sealed)
+
+Notes:
+- runs.status starts as RUNNING, ends as one terminal state.
+- evidence/chain/artifacts are append-only enforced (no UPDATE/DELETE).
+
+──────────────────────────────────────────────────────────────────────────────
+B) Execution PHASE (log + optional DB runs.phase)
+
+Phases:
+  NEW
+  VALIDATING
+  CAPTURING          (collectors + evidence/chain writes; streaming/batched)
+  GENERATING_REPORT  (build report/diff artifacts; compute artifact hashes)
+  SEALING            (finalize + seal run)
+  DONE
+
+Terminal phases:
+  DONE
+
+Phase Transition Diagram (fatal errors jump to ABORTED/FAIL via SEALING)
+
+                ┌──────────────┐
+                │     NEW      │
+                └──────┬───────┘
+                       │
+                       ▼
+              ┌─────────────────┐
+              │   VALIDATING     │
+              │ guardrails/plan  │
+              └──────┬──────────┘
+                     │
+          fatal ┌────┴────┐ ok
+               ▼           ▼
+          ┌──────────┐  ┌─────────────────┐
+          │ SEALING  │  │    CAPTURING     │
+          │ (fail)   │  │ collectors +     │
+          └────┬─────┘  │ evidence+chain   │
+               │        │ (stream/batch)   │
+               │        └──────┬──────────┘
+               │               │
+               │               ▼
+               │      ┌───────────────────┐
+               │      │ GENERATING_REPORT  │
+               │      │ write artifacts +  │
+               │      │ hash artifacts     │
+               │      └───────┬───────────┘
+               │              │
+               ▼              ▼
+          ┌────────────────────────┐
+          │         SEALING        │
+          │ - compute evidence_count│
+          │ - compute final_chain   │
+          │ - update runs terminal  │
+          └──────────┬─────────────┘
+                     │
+                     ▼
+                ┌──────────┐
+                │   DONE   │
+                └──────────┘
+
+──────────────────────────────────────────────────────────────────────────────
+C) Phase Definitions + Rules
+
+NEW
+- run not started
+- run_id may exist in memory only; no DB write yet
+
+VALIDATING
+- plan/profile resolution (variable injection, target expansion)
+- guardrails:
+  * targets exist & readable
+  * profile schema valid
+  * DB openable/writable
+  * refuse unsafe targets unless --force
+- On validation failure:
+  * proceed to SEALING with terminal status = FAIL (no evidence written)
+
+CAPTURING (streaming-friendly)
+- For each collector (deterministic order):
+  * collector yields EvidenceRecord(s)
+  * canonicalize payload (stable ordering + canonical JSON)
+  * compute attachment_sha256/size (if attachment exists)
+  * payload_hash = sha256(payload_json || attachment_sha256 || attachment_size)
+  * append-only insert evidence row(s)
+  * append-only insert chain row(s), using run_seed_hash as genesis
+- Transaction recommendation:
+  * batch insert evidence+chain per collector (or per N records)
+- Collector failures:
+  * record Evidence(kind="collector_error") (handled)
+  * increment errors_count or warnings_count depending on severity policy (see D)
+
+GENERATING_REPORT
+- generate report.md (and/or diff)
+- compute artifact sha256
+- append-only insert artifacts rows
+- (recommended) create Evidence(kind="artifact_manifest") listing {path, sha256} for artifacts
+  and chain it, so artifacts are covered by the same tamper-evident chain
+
+SEALING (required)
+- compute:
+  * evidence_count = COUNT(evidence WHERE run_id)
+  * final_chain_hash = last chain.this_hash for run_id
+- write terminal fields (restricted UPDATE on runs only):
+  * finished_at
+  * warnings_count / errors_count
+  * evidence_count
+  * final_chain_hash
+  * status = OK/WARN/FAIL/ABORTED
+- If process is interrupted before sealing:
+  * next `auditflow repair` (optional future) can mark ABORTED
+  * for MVP: `list-runs` can show RUNNING older than threshold as "stale"
+
+DONE
+- terminal phase; no more writes
+
+──────────────────────────────────────────────────────────────────────────────
+D) Terminal Status Decision Policy (recommended)
+
+FAIL if:
+- DB write failure / chain write failure / cannot compute final_chain_hash
+- cannot seal run (missing required final fields)
+- core collector(s) completely failed and run output is not trustworthy/complete
+
+WARN if:
+- non-core collector partial failure (collector_error recorded but run sealed)
+- anomaly rules triggered
+- missing non-critical fields / parse degradation (e.g., schtasks localization fallback)
+
+OK if:
+- no warnings and no errors; run sealed successfully
+
+ABORTED if:
+- execution interrupted/crashed and run not sealed
+- (optional) marked by later cleanup/repair command
+
+──────────────────────────────────────────────────────────────────────────────
+E) Verification State Machine (verify command)
+
+START
+  │
+  ▼
+LOAD_RUN (run_seed_hash, final_chain_hash, evidence_count)
+  │
+  ▼
+REPLAY_CHAIN (genesis=run_seed_hash; recompute this_hash for each seq)
+  │
+  ▼
+CHECK_ENDPOINTS
+  │  - last_hash == runs.final_chain_hash
+  │  - counted evidence == runs.evidence_count
+  │
+  ┌┴───────────────┐
+  ▼                ▼
+PASS              FAIL
