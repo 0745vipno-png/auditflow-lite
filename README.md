@@ -197,10 +197,3 @@ For full details, see the LICENSE file in this repository.
 Author
 
 Created and maintained by Zhi-Cheng Wang.
-
-Focus areas:
-
-• Windows automation
-• operational reliability
-• CLI infrastructure tooling
-• deterministic system design
