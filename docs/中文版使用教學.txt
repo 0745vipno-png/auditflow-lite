@@ -15,7 +15,7 @@ python -m auditflow.cli run --profile test --target .
 bash python -m auditflow.cli run --profile auditflow/profiles/test.yaml --target .
 
 
-解決方案 C（指定 Home）： 想讓整個系統就跑在桌面的這個資料夾（包含資料庫跟 report），可以用 --home 參數： 
+解決方案 C（指定 Home ）： 想讓整個系統就跑在桌面的這個資料夾（包含資料庫跟 report），可以用 --home 參數： 
 
 bash 
 
