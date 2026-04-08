@@ -1,5 +1,3 @@
-AuditFlow Lite
-
 AuditFlow Lite is a local-first operational auditing tool designed to turn live system state into verifiable evidence and reproducible reports.
 
 It collects system evidence using a read-only, one-shot execution model and stores results in an append-only SQLite evidence store with a tamper-evident hash chain.
