@@ -8,7 +8,6 @@ The goal is simple:
 
 Turn observable system state into verifiable evidence and human-readable reports.
 
-TL;DR
 
 AuditFlow Lite converts live system state into verifiable audit evidence.
 
