@@ -1,0 +1,49 @@
+auditflow-lite/
+│
+├─ README.md
+├─ pyproject.toml           # 可先簡單設定 package
+├─ .gitignore
+│
+├─ auditflow/
+│  │
+│  ├─ __init__.py
+│  ├─ __main__.py           # python -m auditflow
+│  ├─ cli.py                # CLI entry
+│  │
+│  ├─ core/
+│  │  ├─ __init__.py
+│  │  ├─ runner.py          # 核心 pipeline
+│  │  └─ canonical.py       # canonical JSON + payload_hash
+│  │
+│  ├─ config/
+│  │  ├─ __init__.py
+│  │  └─ loader.py          # profile loader + variable injection
+│  │
+│  ├─ collectors/
+│  │  ├─ __init__.py
+│  │  ├─ base.py
+│  │  └─ filesystem_snapshot.py
+│  │
+│  ├─ report/
+│  │  ├─ __init__.py
+│  │  └─ md.py
+│  │
+│  ├─ util/
+│  │  ├─ __init__.py
+│  │  └─ hashing.py
+│  │
+│  └─ store/
+│     ├─ __init__.py
+│     ├─ schema.sql
+│     ├─ db.py
+│     ├─ runs.py
+│     ├─ evidence.py
+│     ├─ chain.py
+│     └─ artifacts.py
+│
+├─ profiles/
+│  └─ windows_basic.yaml
+│
+└─ tests/
+   ├─ test_chain_verify.py          # optional for now
+   └─ test_filesystem_snapshot.py   # optional for now
